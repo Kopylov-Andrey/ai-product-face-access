@@ -14,6 +14,13 @@ REQUIRED = [
     "SELF_REVIEW.md",
     "docs/product.md",
     "docs/risks-and-ops.md",
+    "docs/architecture.md",
+    "docs/ml.md",
+    "docs/monitoring.md",
+    "docs/load-test.md",
+    "web_app.py",
+    "requirements-ui.txt",
+    "scripts/load_smoke.py",
     ".github/workflows/ci.yml",
 ]
 SECRET_PATTERNS = [
