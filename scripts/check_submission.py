@@ -18,8 +18,11 @@ REQUIRED = [
     "docs/ml.md",
     "docs/monitoring.md",
     "docs/load-test.md",
+    "docs/llm.md",
     "web_app.py",
     "requirements-ui.txt",
+    "app/llm_explainer.py",
+    "requirements-llm.txt",
     "scripts/load_smoke.py",
     ".github/workflows/ci.yml",
 ]

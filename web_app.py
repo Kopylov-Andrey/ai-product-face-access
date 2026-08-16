@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import html
 from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
 
 from app.demo import DemoResult, run_demo
+from app.llm_explainer import ExplainerError, explain_incident, explainer_configured
 from app.turnstile import TurnstileSimulator
 
 SCENARIOS = {
@@ -88,9 +90,13 @@ CSS = """
   --amber: #d97706;
   --red: #dc2626;
 }
-header[data-testid="stHeader"] {visibility: hidden; height: 0;}
+header[data-testid="stHeader"] {
+  visibility: visible;
+  height: 3rem;
+  background: rgba(244, 246, 248, .96);
+  border-bottom: 1px solid rgba(229, 231, 235, .75);
+}
 footer {visibility: hidden;}
-#MainMenu {visibility: hidden;}
 .stApp {background: var(--bg); color: var(--text);}
 .block-container {max-width: 1380px; padding-top: 2rem; padding-bottom: 3rem;}
 [data-testid="stSidebar"] {background: var(--nav);}
@@ -311,6 +317,89 @@ footer {visibility: hidden;}
   background: #64748b;
   box-shadow: -5px 8px 0 -1px #64748b, 5px 8px 0 -1px #64748b;
 }
+[data-testid="stButton"] > button {
+  border: 0 !important;
+  border-radius: 10px !important;
+  min-height: 44px;
+  background: #2563eb !important;
+  color: #ffffff !important;
+  font-weight: 750 !important;
+}
+[data-testid="stButton"] > button:hover {
+  background: #1d4ed8 !important;
+  color: #ffffff !important;
+}
+[data-testid="stButton"] > button p,
+[data-testid="stButton"] > button span {
+  color: #ffffff !important;
+}
+[data-testid="stSidebar"] [data-testid="stButton"] > button {
+  background: #ff4b4b !important;
+}
+[data-testid="stSidebar"] [data-testid="stButton"] > button:hover {
+  background: #ef4444 !important;
+}
+.ai-block {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px 18px;
+}
+.ai-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+.ai-title {font-size: 17px; font-weight: 800; color: var(--text);}
+.ai-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .05em;
+}
+.ai-subtitle {font-size: 12px; color: var(--muted); line-height: 1.45;}
+.ai-explanation {
+  margin-top: 12px;
+  padding: 14px 15px;
+  border-radius: 12px;
+  background: #eef6ff;
+  border: 1px solid #bfdbfe;
+  color: #1f2937;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.ai-meta {margin-top: 8px; font-size: 11px; color: var(--muted);}
+.ai-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #166534;
+  font-size: 11px;
+  font-weight: 700;
+}
+.control-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 14px 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+}
+.control-caption {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
 .note {font-size: 12px; color: var(--muted);}
 [data-testid="stDataFrame"] {
   border: 1px solid var(--line);
@@ -326,6 +415,8 @@ def _init_state() -> None:
         st.session_state.turnstile = TurnstileSimulator()
     if "history" not in st.session_state:
         st.session_state.history = []
+    if "ai_explanations" not in st.session_state:
+        st.session_state.ai_explanations = {}
 
 
 def _run(scenario: str) -> DemoResult:
@@ -505,6 +596,71 @@ def _render_event(result: DemoResult) -> None:
     )
 
 
+def _render_ai_explainer(result: DemoResult) -> None:
+    if result.side_effect_allowed:
+        return
+
+    configured = explainer_configured()
+    status = (
+        '<span class="ai-status">● LLM подключена</span>'
+        if configured
+        else ''
+    )
+    st.html(
+        f"""
+        <div class="ai-block">
+          <div class="ai-title-row">
+            <div class="ai-title">Почему проход не выполнен</div>
+            <span class="ai-badge">AI</span>
+          </div>
+          <div class="ai-subtitle">
+            Короткое пояснение для сотрудника после уже принятого решения.
+            Оно не влияет на состояние турникета и не раскрывает внутренние
+            биометрические оценки или защитные пороги.
+          </div>
+          {status}
+        </div>
+        """
+    )
+
+    key = result.audit_id
+    clicked = st.button(
+        "Получить понятное пояснение",
+        key=f"explain-{key}",
+        type="primary",
+        use_container_width=True,
+        disabled=not configured,
+    )
+
+    if not configured:
+        st.caption(
+            "LLM не подключена в текущей сессии. Основной контур доступа "
+            "работает независимо от неё."
+        )
+        return
+
+    if clicked:
+        try:
+            with st.spinner("Формирую короткое пояснение..."):
+                explanation = explain_incident(result)
+            st.session_state.ai_explanations[key] = explanation
+        except ExplainerError as exc:
+            st.warning(str(exc))
+
+    explanation = st.session_state.ai_explanations.get(key)
+    if explanation is not None:
+        safe_text = html.escape(explanation.text).replace("\n", "<br>")
+        st.html(
+            f"""
+            <div class="ai-explanation">{safe_text}</div>
+            <div class="ai-meta">
+              Пояснение сформировано автоматически ·
+              {explanation.latency_seconds:.2f} с
+            </div>
+            """
+        )
+
+
 def _render_history() -> None:
     st.markdown("### Журнал проходов")
     if not st.session_state.history:
@@ -528,7 +684,7 @@ def _render_history() -> None:
     st.dataframe(rows, use_container_width=True, hide_index=True)
 
 
-def _render_sidebar() -> tuple[str, bool]:
+def _render_sidebar() -> None:
     with st.sidebar:
         st.html(
             """
@@ -545,20 +701,34 @@ def _render_sidebar() -> tuple[str, bool]:
         st.caption("Проходная 1")
         st.caption("Камера 1")
         st.divider()
-        st.markdown("**Демо-управление**")
+        st.caption(
+            "Управление демо находится в основной области, поэтому "
+            "интерфейс остаётся доступным даже при свёрнутой боковой панели."
+        )
+
+
+def _render_demo_controls() -> tuple[str, bool]:
+    st.html(
+        """
+        <div class="control-card">
+          <div class="control-caption">Демо-управление</div>
+        </div>
+        """
+    )
+    left, right = st.columns([3, 1], gap="small")
+    with left:
         selected = st.selectbox(
             "Событие",
             tuple(SCENARIOS),
             label_visibility="collapsed",
+            key="main-scenario-select",
         )
+    with right:
         clicked = st.button(
             "Смоделировать проход",
             type="primary",
             use_container_width=True,
-        )
-        st.caption(
-            "Сценарии используют синтетические сигналы и не содержат "
-            "реальных биометрических данных."
+            key="main-run-button",
         )
     return SCENARIOS[selected], clicked
 
@@ -573,7 +743,10 @@ def main() -> None:
     st.html(CSS)
     _init_state()
 
-    scenario, clicked = _render_sidebar()
+    _render_sidebar()
+    _render_header()
+    st.write("")
+    scenario, clicked = _render_demo_controls()
     if clicked:
         st.session_state.last_result = _run(scenario)
         st.session_state.last_scenario = scenario
@@ -581,7 +754,6 @@ def main() -> None:
     last_result = st.session_state.get("last_result")
     current_scenario = st.session_state.get("last_scenario", scenario)
 
-    _render_header()
     st.write("")
     _render_stats(last_result)
     st.write("")
@@ -592,7 +764,7 @@ def main() -> None:
             <div class="panel">
               <div class="section-title">Ожидание события</div>
               <div class="note">
-                Выберите событие в панели слева и смоделируйте проход.
+                Выберите событие в блоке управления выше и смоделируйте проход.
               </div>
             </div>
             """
@@ -603,6 +775,8 @@ def main() -> None:
             _render_event(last_result)
         with right:
             _render_checks(current_scenario)
+            st.write("")
+            _render_ai_explainer(last_result)
 
     st.write("")
     _render_history()
