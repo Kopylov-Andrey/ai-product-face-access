@@ -61,34 +61,40 @@
 - Доля ручной проверки ≤1%
 - Асимметричные издержки: FA >> FR (инцидент безопасности vs 10 секунд на повтор)
 
-**Псевдокод решения:**
+**Псевдокод решения (синхронизирован с PoC):**
 
 ```python
-if quality < T_quality:
-    return RETRY
+if not model_available or not ann_available:
+    return MANUAL_REVIEW  # безопасный резервный сценарий
 
-if liveness < T_liveness:
-    return DENY if suspected_spoof else RETRY
+if not face_detected:
+    return DENY  # next_action: повторный кадр / карта
+if quality != PASS:
+    return DENY  # next_action: повторный кадр / карта
+
+if liveness == SPOOF:
+    return DENY
+if liveness == UNCERTAIN:
+    return MANUAL_REVIEW
+
+if policy_state != FRESH:
+    return MANUAL_REVIEW
+if access_state == REVOKED:
+    return DENY
+if access_state == UNKNOWN:
+    return MANUAL_REVIEW
 
 top1, top2 = ann_top2_then_exact_rerank(embedding)
-
-if top1.score < T_review:
+if no_match(top1):
+    return DENY
+if borderline(top1) or margin(top1, top2) < T_margin:
     return MANUAL_REVIEW
-
-if top1.score >= T_allow:
-    margin = top1.score - top2.score
-    if margin < T_margin:
-        return MANUAL_REVIEW  # неоднозначно
-    
-    if policy_fresh() and policy_valid(top1.employee_id):
-        return ALLOW
-    elif policy_stale():
-        return NO_AUTO_ALLOW  # режим деградации
-    else:
-        return DENY  # отозван
-else:
-    return MANUAL_REVIEW
+if strong_unique(top1) and employee_id_is_known(top1):
+    return ALLOW
+return MANUAL_REVIEW
 ```
+
+`RETRY` в PoC не является отдельным классом решения: для технического отказа решение остаётся `DENY/CLOSED`, а повторный кадр или карта задаются через `next_action`.
 
 **Асимметричные издержки:** FA = инцидент безопасности (500k+ ₽). FR = 10 секунд на повтор + трение UX. Выбор порогов приоритизирует безопасность, границы (guardrails) контролируют FRR и долю ручной проверки.
 
@@ -187,7 +193,7 @@ else:
 
 ## 12. MVP vs Целевая Система
 
-**MVP:** детерминированная логика решений, заглушки CV (случайные оценки), синтетические события. Цель: доказать архитектуру + безопасность, а не точность ML.
+**MVP:** детерминированная логика решений, фиксированные синтетические состояния CV/ANN и синтетические события. Цель: доказать архитектуру + безопасность, а не точность ML.
 
 **Целевая система:** предобученный CV стек, калиброванные пороги на данных валидации, production ANN. Начальный кампус — 12k сотрудников; масштаб до нескольких площадок и сотен тысяч лиц требует benchmark и при необходимости разбиения индекса по площадкам/политикам. Цель: проверить FRR/FPIR и измерить задержку.
 

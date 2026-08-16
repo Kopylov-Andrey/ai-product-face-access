@@ -7,46 +7,46 @@ CV/ML-сигналы в PoC синтетические: этот модуль п
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum
 
 
-class QualityState(StrEnum):
+class QualityState(str, Enum):
     PASS = "pass"
     RETRY = "retry"
     FAIL = "fail"
 
 
-class LivenessState(StrEnum):
+class LivenessState(str, Enum):
     PASS = "pass"
     UNCERTAIN = "uncertain"
     SPOOF = "spoof"
 
 
-class MatchState(StrEnum):
+class MatchState(str, Enum):
     STRONG_UNIQUE = "strong_unique"
     BORDERLINE = "borderline"
     NO_MATCH = "no_match"
 
 
-class PolicyState(StrEnum):
+class PolicyState(str, Enum):
     FRESH = "fresh"
     STALE = "stale"
     UNKNOWN = "unknown"
 
 
-class AccessState(StrEnum):
+class AccessState(str, Enum):
     ACTIVE = "active"
     REVOKED = "revoked"
     UNKNOWN = "unknown"
 
 
-class Decision(StrEnum):
+class Decision(str, Enum):
     ALLOW = "allow"
     DENY = "deny"
     MANUAL_REVIEW = "manual_review"
 
 
-class TurnstileAction(StrEnum):
+class TurnstileAction(str, Enum):
     OPEN = "open"
     CLOSED = "closed"
 
