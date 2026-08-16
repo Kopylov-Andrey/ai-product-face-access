@@ -1,18 +1,50 @@
-# AI Usage
+# Использование AI
 
-> Record only what actually happens during the timed task.
+AI использовался как инструмент для ускорения анализа, чернового проектирования, проверки рисков и разработки PoC. Финальные решения принимались после ручной проверки требований, арифметики, safety-инвариантов и запуска тестов.
 
-## Tools and roles
+## Инструменты и роли
 
-## Where AI helped
+- **ChatGPT** — декомпозиция условия, продуктовая логика, проверка экономики, архитектурный/security review, подготовка и проверка PoC-патчей.
+- **Claude Code** — редактирование файлов репозитория, черновики `product.md`, архитектуры/ML, рисков и мониторинга, запуск локальных проверок. Claude Code работал через внешний model gateway; после исчерпания лимита провайдера дальнейшая работа была продолжена без него.
+- **Read-only subagent Claude** — независимый аудит архитектуры и ML-дизайна без изменения файлов.
 
-## Suggestions I rejected and why
+LLM **не является компонентом критического пути системы** и не участвует в решении `ALLOW` / `DENY`.
 
-## Useful AI mistakes found during review
+## Где AI помог
 
-| AI suggestion / error | How it was detected | What I changed |
+1. Разложить кейс на product, architecture, ML, operations и PoC и удержать приоритет системного дизайна над объёмом кода.
+2. Сформировать воспроизводимую экономическую модель с FRR sensitivity и отделить входные данные задания от assumptions.
+3. Найти эксплуатационное ограничение manual review: даже небольшая доля ручных проверок при 20 проходах/мин быстро потребляет capacity охраны.
+4. Сформировать edge-first архитектуру, offline-политику, идемпотентность `event_id` / `decision_id` / `command_id` и safety invariants.
+5. Сгенерировать минимальный детерминированный PoC и тесты для happy, ambiguous, spoof, stale-policy, revoked и low-quality сценариев.
+
+## Полезные ошибки AI и их исправление
+
+| Предложение / ошибка AI | Как обнаружено | Что изменено |
 |---|---|---|
+| Экономика сначала считала сокращение очереди 90→20 с как базовый факт и давала ~28,8 млн ₽/год | Проверка формулы показала, что почти весь ROI держится на неподтверждённом предположении и есть риск double counting | Базовый сценарий оставлен без выгоды от очереди; очередь вынесена в sensitivity |
+| AI приравнял технический ML latency ≤1 с к общему времени прохода и считал 6→1 с | Сверка с формулировкой задания: ≤1 с — от кадра до команды турникету, 6 с — средний проход по карте | В экономике введены отдельные сценарии общего времени прохода 5/4/3 с; headline base = 4 с |
+| Было утверждение, что `FAR=0` достижим | Это нельзя гарантировать до валидации | Разделены статистическая метрика и safety criterion: в пилоте допустимо **0 подтверждённых false accept**, любой такой инцидент останавливает auto-mode |
+| AI назвал manual review ≤2% «manageable» | Capacity math: 20×2%×4 мин = 1,6 reviewer-minutes/min на одну проходную | Guardrail снижен до 1%; дополнительно мониторятся очередь и доступная capacity |
+| Архитектурный черновик разрешал auto-allow при «degraded-but-approved» stale cache | Read-only security review заметил, что недоставленный отзыв доступа может пропустить уволенного сотрудника | Оставлены FRESH против STALE/UNKNOWN; stale/unknown policy никогда не даёт biometric auto-allow |
+| ML-черновик использовал в основном FMR/FNMR и неявно предлагал exact-search fallback на hot path | Проверка режима 1:N и latency trade-off | Добавлены FPIR/FNIR; target path = ANN top-K → exact re-rank top-K → thresholds/margin → CLOSED при недостаточной уверенности; full exact search — offline baseline |
+| Документы смешивали русскую и английскую прозу | Ручная вычитка | Сдаваемая документация нормализована на русский; английский оставлен только для идентификаторов и стандартных сокращений |
 
-## Decisions made independently
+## Какие предложения AI были отклонены
 
-## Safety review of AI-generated recommendations
+- LLM в контуре `allow/deny`: отклонено из-за недетерминированности, лишней зависимости и требований к audit/safety.
+- Production-ready стек, Kubernetes/CD и крупный web frontend: отклонены как не относящиеся к доказательству выбранной архитектурной идеи в 4-часовом тайм-боксе.
+- Автоматический full exact search при каждом промахе ANN: отклонён из-за противоречия latency-цели; используется offline benchmark.
+- Придуманные retention periods, SLA и ML thresholds: заменены параметрами, которые должны быть получены из shadow/pilot validation и security/legal review.
+
+## Ключевые решения, оставленные за кандидатом
+
+- Edge-first hybrid architecture и правило, что центральный сервис не является синхронной зависимостью каждого прохода.
+- Приоритет безопасности false accept над удобством false reject.
+- Запрет auto-open при spoof, `MANUAL_REVIEW`, revoked и STALE/UNKNOWN policy.
+- Базовый business case без выгоды от очереди и без неподтверждённого снижения нагрузки охраны.
+- Scope PoC: реальные decision/audit/idempotency, но mock CV/ANN вместо псевдо-production биометрии.
+
+## Проверка безопасности AI-рекомендаций
+
+Каждое предложение, способное повлиять на физический доступ, проверялось по явным инвариантам: `MANUAL_REVIEW → CLOSED`, spoof → `CLOSED`, revoked → `CLOSED`, stale/unknown policy → `CLOSED`, повтор одного `command_id` не создаёт повторный `OPEN`. Эти свойства закреплены тестами; итоговый `python scripts/verify.py` запускает тестовый набор и обязательные happy/risky сценарии.

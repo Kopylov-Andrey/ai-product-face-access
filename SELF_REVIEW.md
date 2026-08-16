@@ -1,19 +1,57 @@
-# Self Review
+# Самопроверка
 
-## Weakest part of the solution
+## Самая слабая часть решения
 
-## Assumptions
+Главное ограничение — CV/ML часть PoC замокана: demo доказывает decision flow, safety invariants, audit и идемпотентность, но не доказывает реальную точность face recognition или PAD на данных кампуса. Это сознательный компромисс ради системного дизайна и безопасного вертикального среза.
 
-## Unresolved risks
+## Ключевые предположения
 
-## Demo compromises
+- Базовый экономический сценарий предполагает общее время прохода по лицу 4 с; это не измерение и должно быть проверено пилотом.
+- 250 рабочих дней/год, OPEX 180 000 ₽/год и 10 с на повтор после false reject — расчётные assumptions.
+- 500 000 ₽ за false accept — planning scenario для оценки порядка риска, а не фактический или юридический ущерб.
+- FRR ≤3% и manual review ≤1% — стартовые guardrails пилота, а не обещанная production-способность.
+- Допустимая свежесть policy/revocation snapshot определяется эксплуатацией и безопасностью; конкретный TTL не зафиксирован заранее.
 
-## What I would improve with two additional days
+## Нерешённые риски
 
-## What is required before production
+- Реальные FAR/FRR, FPIR/FNIR и PAD quality неизвестны до validation/shadow mode.
+- Не подтверждена пропускная способность ручной проверки при одновременных пиках трёх проходных.
+- Не выбраны production-модели, лицензии pretrained assets и защищённый edge runtime.
+- Не определены юридическое основание обработки биометрии, сроки хранения incident evidence и процесс отзыва согласия/удаления шаблонов.
+- Не проверены реальные SLA доставки revocation/update и поведение конкретной СКУД.
 
-## What requires legal/security review
+## Компромиссы ради demo
 
-## What should not be fully automated
+- Synthetic events вместо кадров и реальных embedding.
+- Mock состояния quality/PAD/ANN вместо запуска тяжёлых CV-моделей.
+- Локальный JSONL audit вместо централизованного append-only хранилища.
+- `TurnstileSimulator` вместо физической интеграции; реальным является только контракт идемпотентной команды.
+- Нет отдельного UI охраны: причина решения видна в CLI/audit, что достаточно для выбранного PoC.
 
-## Pilot data that would make me stop the project
+## Что улучшить за два дополнительных дня
+
+1. Подключить лицензионно допустимый pretrained baseline и небольшой synthetic/public validation набор без данных сотрудников.
+2. Измерить latency компонентов и сравнить exact search с 1–2 ANN-конфигурациями на масштабе 12k/100k synthetic embeddings.
+3. Добавить property-based/failure-injection tests для snapshot swap, ACK/NACK и offline audit sync.
+4. Собрать небольшой операторский UI только для просмотра audit/manual-review, без права обходить decision engine.
+5. Автоматизировать проверку внутренних Markdown-ссылок и Mermaid в финальном CI.
+
+## Что требуется перед production
+
+- Реальный shadow-пилот на проходной и threshold calibration на validation set со split по личностям, камерам, дням и условиям.
+- Security review edge-устройств, key management, update channel, template storage и turnstile adapter.
+- Нагрузочные и отказоустойчивые испытания, включая WAN loss, stale policy, corrupted index и duplicate commands.
+- Согласованный процесс model/index/policy rollout и rollback с наблюдаемыми версиями на каждом edge.
+- Подтверждённая capacity охраны для ручных кейсов и резервного режима.
+
+## Что нельзя запускать без legal/security review
+
+Хранение и распространение биометрических templates, возможное сохранение изображений инцидентов, выбор правового основания обработки, доступ администраторов к биометрии, сроки удаления и действия при компрометации шаблонов.
+
+## Что не стоит автоматизировать полностью
+
+Неоднозначную идентификацию, подозрение на spoofing, случаи со stale/unknown access policy и расследование подтверждённого false accept. `MANUAL_REVIEW` не является разрешением на проход: до отдельного решения турникет остаётся закрытым.
+
+## Какие данные пилота заставят остановить проект
+
+Автоматический режим останавливается при любом подтверждённом false accept. Раскатка также должна быть заморожена, если FRR устойчиво превышает пилотный guardrail, manual-review queue растёт быстрее доступной capacity, p95 ML decision latency не укладывается в 1 с после технических исправлений или выявляется систематическая деградация качества по отдельным камерам/условиям/релевантным группам, которую нельзя устранить приемлемой настройкой системы.
