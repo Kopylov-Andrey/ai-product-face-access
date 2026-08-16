@@ -32,6 +32,8 @@ PoC намеренно небольшой: CV-сигналы и ANN-match зам
 
 ## Запуск за минуту
 
+Требуется **Python 3.10+**. CI проверяет проект на Python 3.10 и 3.13.
+
 ```bash
 python -m venv .venv
 # Windows PowerShell: .venv\Scripts\Activate.ps1
@@ -52,6 +54,7 @@ python -m app.demo --scenario low_quality
 ```
 
 По умолчанию access events пишутся в `var/access_audit.jsonl`; `var/` исключён из Git.
+Идемпотентность физической команды в PoC хранится в памяти одного процесса симулятора; персистентное dedup-хранилище между перезапусками — часть целевой интеграции СКУД, а не этого минимального PoC.
 
 ## Архитектурная идея
 
