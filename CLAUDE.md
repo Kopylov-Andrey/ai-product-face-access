@@ -1,31 +1,28 @@
-# Project instructions for Claude Code
+# Инструкции проекта для AI coding tools
 
-This repository is a generic starter for a time-boxed AI Product system-design task.
-It MUST remain domain-neutral until the real task is received.
+Это реальная сдаваемая работа по 4-часовому заданию AI Product: система биометрического контроля доступа на проходной.
 
-## Priorities
-1. System/product reasoning is more important than code volume.
-2. Build only the smallest vertical PoC that proves a chosen architectural idea.
-3. Prefer deterministic, dependency-light code.
-4. Risky/uncertain paths must fail safe; never invent unsafe automatic actions.
-5. Every meaningful behavior added to the PoC must be covered by a test.
-6. Do not invent requirements, measurements, legal claims, or production guarantees.
-7. Keep assumptions explicit in documentation.
-8. Keep WORKLOG factual and consistent with actual Git history.
-9. Keep AI_USAGE factual: record useful AI mistakes and rejected suggestions as they happen.
-10. Never write API keys, tokens, credentials, employee data, or biometric data into the repo.
+## Приоритеты
+1. Системное и продуктовое мышление важнее объёма кода.
+2. PoC — минимальный вертикальный срез, доказывающий выбранную архитектурную идею.
+3. Предпочитать детерминированный код с минимумом зависимостей.
+4. Рискованные и неопределённые пути должны завершаться безопасно: автоматический `OPEN` запрещён.
+5. Каждое существенное поведение PoC покрывается тестом.
+6. Не выдумывать требования, измерения, юридические утверждения и production-гарантии.
+7. Все предположения явно отмечать в документации.
+8. `WORKLOG.md` должен соответствовать фактической Git-истории и состоянию репозитория.
+9. `AI_USAGE.md` должен честно фиксировать роль AI, его ошибки и отклонённые предложения.
+10. Не сохранять в репозитории API-ключи, токены, данные сотрудников или реальные биометрические данные.
 
-## Language
-Все пользовательские и сдаваемые Markdown-документы пишутся на русском языке.
-Английский допускается только для кода, идентификаторов, названий файлов,
-стандартных сокращений и терминов, перевод которых ухудшает техническую точность.
+## Язык
+Все пользовательские и сдаваемые Markdown-документы пишутся на русском языке. Английский допускается для кода, идентификаторов, имён файлов, стандартных сокращений и терминов, перевод которых ухудшает точность.
 
-## Before proposing a commit
-Run:
+## Перед коммитом
+Запустить:
 
     python scripts/verify.py
 
-Review the diff and keep the commit limited to one coherent stage of work.
+Проверить изменения и ограничить коммит одним логическим этапом.
 
-## Scope discipline
-Do not add Kubernetes, databases, web UI, cloud deployment, external APIs, or ML training unless the actual task makes them necessary to prove the selected scenario.
+## Scope
+Не добавлять Kubernetes, production deployment, внешние runtime-LLM, обучение биометрической модели или сложный frontend, если это не требуется для доказательства выбранного сценария.

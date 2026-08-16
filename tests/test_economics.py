@@ -129,8 +129,8 @@ def test_guard_workload_reduction() -> None:
 
     # Guard: (40-10) × 4 min × 250 / 60 = 500 h
     assert result.guard_workload_savings_hours == pytest.approx(500, rel=1e-3)
-    # At 600 ₽/h: 300,000 ₽
-    assert result.guard_workload_savings_rub == pytest.approx(300_000, rel=1e-3)
+    # 30 fewer cases/day × 120 ₽/case × 250 days = 900,000 ₽
+    assert result.guard_workload_savings_rub == pytest.approx(900_000, rel=1e-3)
 
 
 def test_card_replacement_reduction() -> None:
@@ -202,7 +202,6 @@ def test_custom_given_parameters() -> None:
         peak_percentage=0.5,
         entrances=1,
         cameras_per_entrance=2,
-        working_days_per_year=250,
         current_passage_time_seconds=10.0,
         edge_gpu_cost_per_entrance_rub=100_000,
         camera_cost_rub=20_000,

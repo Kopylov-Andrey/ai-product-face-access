@@ -19,6 +19,17 @@ PoC намеренно небольшой: CV-сигналы и ANN-match зам
 | `revoked` | `DENY` | `CLOSED` | отказ в доступе |
 | `low_quality` | `DENY` | `CLOSED` | повторный кадр или карта |
 
+### Проверяемость ключевых требований
+
+| Требование | Реализация | Проверка |
+|---|---|---|
+| Happy path открывает турникет | `app/decision.py`, `app/demo.py` | `tests/test_demo.py` |
+| Неоднозначный матч не открывает доступ | `MANUAL_REVIEW → CLOSED` | `tests/test_demo.py` |
+| Spoof / stale policy / revoked / model или ANN unavailable безопасно закрываются | fail-safe ветки decision engine | `tests/test_safety.py` |
+| Повтор команды не открывает турникет второй раз | dedup по `command_id` | `tests/test_idempotency.py` |
+| Причина решения попадает в audit trail | JSONL audit record | `tests/test_audit.py` |
+| Экономика воспроизводима | `scripts/economics.py` | `tests/test_economics.py` |
+
 ## Запуск за минуту
 
 ```bash

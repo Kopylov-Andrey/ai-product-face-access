@@ -1,4 +1,29 @@
+from app.decision import decide
 from app.demo import run_demo
+from app.models import (
+    AccessContext,
+    AccessEvent,
+    AccessState,
+    CvSignals,
+    LivenessState,
+    MatchState,
+    PolicyState,
+    QualityState,
+)
+
+
+def _event(event_id: str) -> AccessEvent:
+    return AccessEvent(event_id, "gate-1", "cam-1a", "2026-07-31T09:00:00Z")
+
+
+def _strong_signals(*, liveness: LivenessState = LivenessState.PASS) -> CvSignals:
+    return CvSignals(
+        True,
+        QualityState.PASS,
+        liveness,
+        MatchState.STRONG_UNIQUE,
+        "emp-1",
+    )
 
 
 def test_low_quality_uses_fast_fallback_without_open() -> None:
@@ -33,3 +58,44 @@ def test_revoked_employee_never_opens_turnstile() -> None:
     assert result.side_effect_allowed is False
     assert result.turnstile_command == "closed"
     assert "access_revoked" in result.reasons
+
+
+def test_model_unavailable_fails_closed() -> None:
+    decision = decide(
+        _event("e-model-down"),
+        _strong_signals(),
+        AccessContext(PolicyState.FRESH, AccessState.ACTIVE, model_available=False),
+    )
+    assert decision.side_effect_allowed is False
+    assert decision.turnstile_action.value == "closed"
+
+
+def test_ann_unavailable_fails_closed() -> None:
+    decision = decide(
+        _event("e-ann-down"),
+        _strong_signals(),
+        AccessContext(PolicyState.FRESH, AccessState.ACTIVE, ann_available=False),
+    )
+    assert decision.side_effect_allowed is False
+    assert decision.turnstile_action.value == "closed"
+
+
+def test_unknown_policy_fails_closed() -> None:
+    decision = decide(
+        _event("e-policy-unknown"),
+        _strong_signals(),
+        AccessContext(PolicyState.UNKNOWN, AccessState.ACTIVE),
+    )
+    assert decision.side_effect_allowed is False
+    assert decision.turnstile_action.value == "closed"
+
+
+def test_uncertain_liveness_requires_review_and_stays_closed() -> None:
+    decision = decide(
+        _event("e-live-uncertain"),
+        _strong_signals(liveness=LivenessState.UNCERTAIN),
+        AccessContext(PolicyState.FRESH, AccessState.ACTIVE),
+    )
+    assert decision.decision.value == "manual_review"
+    assert decision.side_effect_allowed is False
+    assert decision.turnstile_action.value == "closed"

@@ -28,8 +28,6 @@ class GivenParameters:
     entrances: int = 3
     cameras_per_entrance: int = 2
     peak_passages_per_min_per_entrance: int = 20
-    working_days_per_year: int = 250
-
     # Current baseline (given)
     current_passage_time_seconds: float = 6.0
     current_peak_queue_time_seconds: float = 90.0  # Observed, not predicted
@@ -54,6 +52,9 @@ class GivenParameters:
 @dataclass(frozen=True)
 class Assumptions:
     """Explicit assumptions that affect calculations."""
+
+    # Planning horizon (assumption, not supplied by task)
+    working_days_per_year: int = 250
 
     # Target face passage time (assumption scenario, not measured)
     # ML decision latency <=1s is a technical requirement, NOT total passage time
@@ -221,7 +222,7 @@ def calculate(
     annual_passage_seconds_saved = (
         passage_time_saved_per_passage
         * given.passages_per_day
-        * given.working_days_per_year
+        * assumptions.working_days_per_year
     )
     passage_time_savings_hours = annual_passage_seconds_saved / 3600
     passage_time_savings_rub = (
@@ -233,7 +234,7 @@ def calculate(
     annual_queue_seconds_saved = (
         assumptions.queue_time_reduction_seconds
         * peak_passages_per_day
-        * given.working_days_per_year
+        * assumptions.working_days_per_year
     )
     queue_time_savings_hours = annual_queue_seconds_saved / 3600
     queue_time_savings_rub = (
@@ -246,10 +247,15 @@ def calculate(
             given.manual_cases_per_day - assumptions.target_manual_cases_per_day
         ) * given.manual_case_duration_minutes
         guard_workload_savings_hours = (
-            guard_minutes_saved_per_day * given.working_days_per_year / 60
+            guard_minutes_saved_per_day * assumptions.working_days_per_year / 60
+        )
+        guard_cases_saved_per_day = (
+            given.manual_cases_per_day - assumptions.target_manual_cases_per_day
         )
         guard_workload_savings_rub = (
-            guard_workload_savings_hours * given.employee_cost_per_minute_rub * 60
+            guard_cases_saved_per_day
+            * given.manual_case_cost_rub
+            * assumptions.working_days_per_year
         )
     else:
         guard_workload_savings_hours = 0
@@ -267,7 +273,7 @@ def calculate(
     annual_frr_seconds_lost = (
         frr_cases_per_day
         * assumptions.frr_retry_delay_seconds
-        * given.working_days_per_year
+        * assumptions.working_days_per_year
     )
     frr_time_loss_hours = annual_frr_seconds_lost / 3600
     frr_time_loss_rub = (

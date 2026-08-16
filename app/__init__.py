@@ -1,1 +1,1 @@
-"""Generic placeholder package for infrastructure rehearsal."""
+"""Минимальный PoC биометрического контроля доступа."""
