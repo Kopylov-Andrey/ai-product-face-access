@@ -3,65 +3,65 @@
 ## 1. ML Pipeline
 
 ```
-camera frame → detection → quality assessment → alignment
-  → liveness/PAD → embedding extraction → ANN identification (1:N)
-  → threshold + margin logic → policy validation → decision
+кадр камеры → обнаружение → оценка качества → выравнивание
+  → liveness/PAD → извлечение embedding → ANN идентификация (1:N)
+  → логика порогов + margin → валидация политики → решение
 ```
 
-Каждый компонент — ML inference или deterministic rule.
+Каждый компонент — ML inference или детерминированное правило.
 
 ## 2. Verification (1:1) vs Identification (1:N)
 
-**Verification (1:1):** проверка claimed identity. Сравнение с одним reference. Fast, lower false match risk. Требует заявленную identity (например, card).
+**Verification (1:1):** проверка заявленной личности. Сравнение с одним эталоном. Быстрее, ниже риск ложного совпадения. Требуется заявленная личность (например, карта).
 
-**Identification (1:N):** поиск без заявленной identity среди N сотрудников. Slower при exhaustive, higher risk при большом N.
+**Identification (1:N):** поиск без заявленной личности среди N сотрудников. Медленнее при исчерпывающем поиске, выше риск при большом N.
 
-**Выбор:** основной режим — **identification (1:N)** face-only. Card fallback теоретически позволяет 1:1 verification, но не является частью automatic biometric happy path.
+**Выбор:** основной режим — **identification (1:N)** только по лицу. Резервный вариант по карте теоретически позволяет 1:1 verification, но не является частью автоматического биометрического пути.
 
-**Metrics distinction:**
+**Различие метрик:**
 
-| Mode | Metrics |
-|------|---------|
-| 1:1 Verification | FMR (False Match Rate), FNMR (False Non-Match Rate) |
-| 1:N Identification | FPIR (False Positive Identification Rate), FNIR (False Negative Identification Rate), Rank-K accuracy |
+| Режим | Метрики |
+|-------|---------|
+| 1:1 Verification | FMR, FNMR |
+| 1:N Identification | FPIR, FNIR, Rank-K accuracy |
 
-**Product/safety level:** используем FAR/FRR terminology (более понятные), но **system-level 1:N evaluation must use FPIR/FNIR и identification metrics**. FPIR scales with N (12,000 employees).
+**Продуктовый уровень:** используем терминологию FAR/FRR (понятнее заинтересованным сторонам), но **системная оценка 1:N должна использовать FPIR/FNIR**. FPIR масштабируется с N (12,000 сотрудников).
 
-## 3. ANN (Approximate Nearest Neighbor) Index
+## 3. ANN (Approximate Nearest Neighbor) Индекс
 
-**Проблема exhaustive:** 12k embeddings × O(N) comparison непрактично для latency target.
+**Проблема исчерпывающего поиска:** 12k embeddings × O(N) сравнений непрактично для целевой задержки.
 
-**Решение: ANN index** (FAISS, HNSW, Annoy — выбор implementation-dependent, requires benchmark).
+**Решение: ANN индекс** (FAISS, HNSW, Annoy — выбор зависит от реализации, требует бенчмарка).
 
-**Target design:**
-1. ANN top-K retrieval (K=5–10 candidates)
-2. Exact similarity re-ranking retrieved candidates
-3. Threshold logic: T_allow / T_review + second-best margin
-4. Insufficient confidence ⇒ MANUAL_REVIEW / CLOSED
+**Целевой дизайн:**
+1. ANN извлечение top-K (K=5–10 кандидатов)
+2. Точная переранжировка по сходству извлечённых кандидатов
+3. Логика порогов: T_allow / T_review + margin до второго лучшего
+4. Недостаточная уверенность ⇒ MANUAL_REVIEW / CLOSED
 
-**Не заявляем automatic exhaustive search fallback** на каждый hot-path miss (latency prohibitive).
+**Не заявляем автоматический резервный вариант с исчерпывающим поиском** на каждый промах на критическом пути (задержка запретительна).
 
-**Exhaustive exact search** используется offline/shadow как benchmark для измерения ANN recall и threshold behavior.
+**Исчерпывающий точный поиск** используется в автономном или теневом режиме как бенчмарк для измерения ANN recall и поведения порогов.
 
-**ANN/index quality uncertainty → fail closed.**
+**Неопределённость качества ANN или индекса → безопасный отказ.**
 
-## 4. Threshold Calibration
+## 4. Калибровка Порогов
 
-**Требуется multiple thresholds:**
+**Требуется несколько порогов:**
 
-- **T_allow:** high confidence для auto-open
-- **T_review:** borderline → manual review
-- **Margin:** minimum difference между top-1 и top-2 scores (unique match)
-- **T_liveness:** PAD threshold
-- **T_quality:** technical quality gates
+- **T_allow:** высокая уверенность для автоматического открытия
+- **T_review:** пограничный → ручная проверка
+- **Margin:** минимальная разница между top-1 и top-2 scores (уникальное совпадение)
+- **T_liveness:** порог PAD
+- **T_quality:** пороги технического качества
 
-**Threshold values НЕ изобретаются.** Calibrated на validation data с учётом:
-- Target FRR ≤3% pilot
-- FPIR minimization
-- Manual review rate ≤1%
-- Asymmetric costs: FA >> FR (security incident vs 10s retry)
+**Значения порогов НЕ изобретаются.** Калибруются на данных валидации с учётом:
+- Целевая FRR ≤3% для пилота
+- Минимизация FPIR
+- Доля ручной проверки ≤1%
+- Асимметричные издержки: FA >> FR (инцидент безопасности vs 10 секунд на повтор)
 
-**Decision pseudo-code:**
+**Псевдокод решения:**
 
 ```python
 if quality < T_quality:
@@ -78,129 +78,129 @@ if top1.score < T_review:
 if top1.score >= T_allow:
     margin = top1.score - top2.score
     if margin < T_margin:
-        return MANUAL_REVIEW  # ambiguous
+        return MANUAL_REVIEW  # неоднозначно
     
     if policy_fresh() and policy_valid(top1.employee_id):
         return ALLOW
     elif policy_stale():
-        return NO_AUTO_ALLOW  # degraded
+        return NO_AUTO_ALLOW  # режим деградации
     else:
-        return DENY  # revoked
+        return DENY  # отозван
 else:
     return MANUAL_REVIEW
 ```
 
-**Asymmetric costs:** FA = security incident (500k+ ₽). FR = 10s retry + UX friction. Threshold selection prioritizes security while guardrails control FRR/review-rate.
+**Асимметричные издержки:** FA = инцидент безопасности (500k+ ₽). FR = 10 секунд на повтор + трение UX. Выбор порогов приоритизирует безопасность, границы (guardrails) контролируют FRR и долю ручной проверки.
 
-## 5. Validation Design
+## 5. Дизайн Валидации
 
-**CRITICAL: split by identity/person, не by frames.** Frames одного человека в train+validation ⇒ data leakage, unrealistic FRR.
+**КРИТИЧНО: разделение по личности, а не по кадрам.** Кадры одного человека в обучающей и валидационной выборках ⇒ утечка данных, нереалистичная FRR.
 
-**Coverage requirements:**
-- Multiple cameras, days, lighting conditions
-- Occlusions: masks, glasses, headwear
-- Demographic subgroups (если legal/available) для bias detection
-- PAD attack samples: printed photos, screen/video replay
+**Требования покрытия:**
+- Несколько камер, дней, условий освещения
+- Окклюзии: маски, очки, головные уборы
+- Демографические подгруппы (если юридически разрешено и доступно) для обнаружения систематического смещения
+- Образцы PAD атак: печатные фото, воспроизведение с экрана или видео
 
-**Per-condition metrics:** FRR by camera/lighting/occlusion, не только aggregate. Выявляет systematic bias.
+**Метрики по условиям:** FRR отдельно по камере, освещению, окклюзии, а не только агрегированные. Выявляет систематическое смещение.
 
-**Prevent leakage:** employee template updates, temporal drift, registry changes не попадают в validation как "новые" данные.
+**Предотвращение утечки:** обновления шаблонов сотрудников, временной дрейф, изменения реестра не попадают в валидацию как "новые" данные.
 
-## 6. Metrics
+## 6. Метрики
 
-**Biometric (1:N identification):**
-- FPIR / FNIR (system-level 1:N metrics)
-- FAR / FRR (product-level terminology, понятнее stakeholders)
-- ROC/DET curves для threshold selection
-- Rank-1 identification accuracy
+**Биометрические (1:N identification):**
+- FPIR / FNIR (системные метрики для 1:N)
+- FAR / FRR (продуктовая терминология, понятнее заинтересованным сторонам)
+- Кривые ROC/DET для выбора порогов
+- Точность идентификации Rank-1
 
 **Liveness/PAD:**
-- APCER (attack pass rate), BPCER (genuine reject rate)
-- Per-attack-type metrics
+- APCER (доля прошедших атак), BPCER (доля отклонённых легитимных)
+- Метрики по типам атак
 
-**System:**
-- Manual review rate ≤1% pilot
-- Latency p50/p95/p99
-- Throughput passages/min
+**Системные:**
+- Доля ручной проверки ≤1% для пилота
+- Задержка p50/p95/p99
+- Пропускная способность в проходах в минуту
 
-## 7. Delayed Labels
+## 7. Отложенные Метки
 
-Ground truth labels приходят асинхронно:
+Метки истинности приходят асинхронно:
 
-1. **Guard review outcome:** manual review → guard decision, joined via event_id
-2. **Employee complaints:** "система не пустила" → false reject signal
-3. **Successful fallback:** employee прошёл по карте после biometric reject → FR signal
-4. **Confirmed security incidents:** forensic review → potential FA
+1. **Результаты проверки охраной:** ручная проверка → решение охраны, связывается через event_id
+2. **Жалобы сотрудников:** "система не пустила" → сигнал ложного отказа
+3. **Успешный резервный вариант:** сотрудник прошёл по карте после биометрического отказа → сигнал FR
+4. **Подтверждённые инциденты безопасности:** судебная экспертиза → потенциальный FA
 
-**Используются для:** threshold recalibration, model retraining, continuous monitoring drift.
+**Используются для:** рекалибровки порогов, переобучения модели, непрерывного мониторинга дрейфа.
 
 ## 8. Liveness/PAD
 
-**Baseline: layered passive PAD** (no user action required) + quality checks.
+**Базовый подход: многослойный пассивный PAD** (без действий пользователя) + проверки качества.
 
-**Threat model:**
+**Модель угроз:**
 
-| Attack | In Scope | Mitigation |
-|--------|----------|------------|
-| Printed photo (color/B&W) | ✅ | Texture, depth, quality |
-| Screen replay (phone/tablet/laptop) | ✅ | Moiré, reflectance |
-| Video replay | ✅ | Depth, micro-movements |
-| 3D mask (high-quality) | ⚠️ Candidate future | Difficult, requires advanced PAD |
+| Атака | В области охвата | Противодействие |
+|-------|------------------|-----------------|
+| Печатное фото (цветное или ч/б) | ✅ | Текстура, глубина, качество |
+| Воспроизведение с экрана (телефон/планшет/ноутбук) | ✅ | Муар, отражение |
+| Воспроизведение видео | ✅ | Глубина, микродвижения |
+| 3D маска (высокое качество) | ⚠️ Кандидат на будущее | Сложно, требует продвинутого PAD |
 
-**Не заявляем perfect spoof protection.** PAD — arms race. **Uncertain PAD result → CLOSED** (fail safe).
+**Не заявляем идеальную защиту от спуфинга.** PAD — гонка вооружений. **Неопределённый результат PAD → CLOSED** (безопасный отказ).
 
 ## 9. LLM в Системе
 
-**Explicit: LLM НЕ используется для detection, matching, liveness или allow/deny.**
+**Явно: LLM НЕ используется для обнаружения, сопоставления, liveness или принятия решения ALLOW/DENY.**
 
 **Причины:**
-1. Non-determinism несовместим с safety audit для физического доступа
-2. Latency (сотни ms - секунды) нарушает target ≤1 с
-3. Unnecessary: детерминированная CV pipeline + rule engine достаточны
-4. Hard safety requirements: provable invariants (INV-1..6) нельзя гарантировать с LLM
-5. Auditability: forensic review требует reproducible decisions
+1. Недетерминизм несовместим с аудитом безопасности для физического доступа
+2. Задержка (сотни миллисекунд - секунды) нарушает целевую ≤1 с
+3. Излишне: детерминированный CV pipeline + движок правил достаточны
+4. Жёсткие требования безопасности: доказуемые инварианты нельзя гарантировать с LLM
+5. Аудируемость: судебная экспертиза требует воспроизводимых решений
 
-**Potential future use (НЕ в критическом пути):** incident summarization для operators, но **не может override** deterministic engine.
+**Потенциальное будущее использование (НЕ на критическом пути):** суммаризация инцидентов для операторов, но **не может переопределять** детерминированный движок.
 
-## 10. Model Selection и Licensing
+## 10. Выбор Модели и Лицензирование
 
-**Не изобретаем benchmark numbers.** Процесс: survey SOTA → benchmark на validation → pilot measurement.
+**Не изобретаем числа бенчмарков.** Процесс: обзор современных решений → бенчмарк на данных валидации → измерение в пилоте.
 
-**Candidate pretrained models (для evaluation, НЕ commitment):**
-- Embedding: InsightFace-family, ArcFace-based, FaceNet
-- Detection: RetinaFace, MTCNN, BlazeFace
-- Liveness: Silent-Face-Anti-Spoofing, FAS-based
+**Кандидаты предобученных моделей (для оценки, НЕ обязательство):**
+- Embedding: семейство InsightFace, основанные на ArcFace, FaceNet
+- Обнаружение: RetinaFace, MTCNN, BlazeFace
+- Liveness: Silent-Face-Anti-Spoofing, архитектуры на основе FAS
 
-**ВАЖНО: research availability ≠ production licensing approval.**
+**ВАЖНО: доступность для исследований ≠ одобрение production лицензирования.**
 
-Specifically, **InsightFace-family models** и другие research pretrained assets **require license validation** before commercial/production use. Legal/compliance review mandatory.
+В частности, **модели семейства InsightFace** и другие исследовательские предобученные ресурсы **требуют валидации лицензий** перед коммерческим или production использованием. Обязательна проверка юридическим отделом и комплаенсом.
 
-Final choice: benchmark-driven, validated в pilot.
+Финальный выбор: на основе бенчмарков, валидирован в пилоте.
 
-## 11. Continuous Learning
+## 11. Непрерывное Обучение
 
-**Template drift:** aging, hairstyle, facial hair. Periodically request re-enrollment (operational policy, not invented cadence) или accumulate high-confidence ALLOW → auto-update template (с approval).
+**Дрейф шаблонов:** старение, причёска, борода. Периодически запрашивать повторную регистрацию (операционная политика) или накапливать высокоуверенные ALLOW → автоматическое обновление шаблона (с процессом одобрения).
 
-**Model retraining:** collect production data (с consent/legal), retrain на updated data, versioned deployment, canary rollout.
+**Переобучение модели:** сбор production данных (с согласием и юридическим одобрением), переобучение на обновлённых данных, версионированное развёртывание, постепенный раскат.
 
-**Threshold recalibration:** monitor delayed labels, re-tune на updated validation.
+**Рекалибровка порогов:** мониторинг отложенных меток, донастройка на обновлённых данных валидации.
 
-## 12. MVP vs Target
+## 12. MVP vs Целевая Система
 
-**MVP:** deterministic decision logic, mock CV (random scores), synthetic events. Цель: prove architecture + safety, не ML accuracy.
+**MVP:** детерминированная логика решений, заглушки CV (случайные оценки), синтетические события. Цель: доказать архитектуру + безопасность, а не точность ML.
 
-**Target:** pretrained CV stack, calibrated thresholds на validation, production ANN (12k), real employee cohort. Цель: validate FRR/FPIR, measure latency.
+**Целевая система:** предобученный CV стек, калиброванные пороги на данных валидации, production ANN (12k), реальная когорта сотрудников. Цель: проверить FRR/FPIR, измерить задержку.
 
 ## 13. Ключевые ML Решения
 
-1. **Identification (1:N)** face-only, не verification (1:1) с картой
-2. **ANN + exact re-ranking** вместо exhaustive hot-path search
-3. **FPIR/FNIR metrics** для system-level 1:N evaluation
-4. **Multiple thresholds + margin** вместо single threshold
-5. **Split by identity** validation, prevent leakage
-6. **Per-condition metrics** detect bias
-7. **Asymmetric cost-driven** threshold selection
-8. **Passive PAD baseline**, fail closed на uncertain
-9. **Delayed labels** integration для continuous monitoring
-10. **No LLM в critical path:** deterministic, auditable, low-latency
-11. **Licensing validation mandatory** для production pretrained models
+1. **Identification (1:N)** только по лицу, а не verification (1:1) с картой
+2. **ANN + точная переранжировка** вместо исчерпывающего поиска на критическом пути
+3. **Метрики FPIR/FNIR** для системной оценки 1:N
+4. **Несколько порогов + margin** вместо одного порога
+5. **Разделение по личности** для валидации, предотвращение утечки
+6. **Метрики по условиям** обнаруживают систематическое смещение
+7. **Выбор порогов на основе асимметричных издержек**
+8. **Пассивный PAD baseline**, безопасный отказ при неопределённости
+9. **Интеграция отложенных меток** для непрерывного мониторинга
+10. **Без LLM на критическом пути:** детерминированный, аудируемый, низкая задержка
+11. **Обязательна валидация лицензирования** для production предобученных моделей

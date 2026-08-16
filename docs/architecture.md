@@ -4,160 +4,160 @@
 
 **Задача:** распознавание лица для автоматического открытия турникета.
 
-**Масштаб:** 12 000 сотрудников, 3 входа (2 камеры/вход), 19 000 проходов/день, пик 20 проходов/мин/вход.
+**Масштаб:** 12 000 сотрудников, 3 входа (2 камеры на вход), 19 000 проходов в день, пик 20 проходов в минуту на вход.
 
-**Требования:** ML decision latency target ≤1 с, 0 подтверждённых false accepts (pilot), FRR ≤3% pilot target, offline resilience, fail-safe.
+**Требования:** целевая задержка ML-решения ≤1 с, 0 подтверждённых false accepts (пилот), целевая FRR ≤3% для пилота, работа в автономном режиме, безопасный отказ.
 
-**Принцип безопасности:** физический доступ определяется детерминированной логикой. LLM не находится в критическом пути allow/deny.
+**Принцип безопасности:** физический доступ определяется детерминированной логикой. LLM не участвует в принятии решения ALLOW/DENY.
 
-## 2. Edge-first Hybrid Architecture
+## 2. Гибридная Архитектура с Приоритетом Edge
 
-**Выбор:** edge-first hybrid — синхронный hot path на edge, асинхронный control plane центрально.
+**Выбор:** критический синхронный путь выполняется на edge, асинхронный управляющий контур — централизованно.
 
 **Обоснование:**
-- Target ML decision latency ≤1 с требует минимизации WAN
-- Offline/degraded operation обязательна
-- Central services — control plane (registry, policy, updates, audit), не hot-path dependency
+- Целевая задержка ML-решения ≤1 с требует минимизации обращений по WAN
+- Работа в автономном режиме и при деградации обязательна
+- Центральные сервисы — управляющий контур (реестр, политики, обновления, аудит), а не обязательная зависимость на критическом пути
 
-**Edge node:** detection → decision → turnstile command, локальный кэш (ANN index, access policy), durable audit queue, автономия в пределах policy freshness window.
+**Узел Edge:** обнаружение → решение → команда турникету, локальный кэш (ANN индекс, политики доступа), устойчивая очередь аудита, автономность в пределах актуальности политик.
 
-**Central services:** employee registry, biometric template store, access policy + revocation, model/version distribution, central audit, monitoring, manual review backend.
+**Центральные сервисы:** реестр сотрудников, хранилище биометрических шаблонов, управление политиками доступа и отзывами, распространение моделей и версий, центральный аудит, мониторинг, backend ручной проверки.
 
-## 3. Синхронный Hot Path (Edge)
+## 3. Критический Синхронный Путь (Edge)
 
 ```
-camera → detection → quality → alignment → liveness/PAD
-  → embedding → ANN identification (local 1:N) → policy lookup (cached)
-  → deterministic decision → idempotent turnstile command → local audit
+камера → обнаружение → проверка качества → выравнивание → liveness/PAD
+  → извлечение embedding → ANN идентификация (локально 1:N) → проверка политики (кэш)
+  → детерминированное решение → идемпотентная команда турникету → локальный аудит
 ```
 
-**Target latency budget (design, не измерено):** detection ~150 ms, PAD ~100 ms, embedding ~150 ms, ANN ~30 ms, policy <5 ms, decision <5 ms, command ~30 ms. Total ~465 ms + reserve → <1 s target. Реальная latency измеряется в pilot.
+**Целевой бюджет задержки (проектный, не измерен):** обнаружение ~150 ms, PAD ~100 ms, embedding ~150 ms, ANN ~30 ms, политика <5 ms, решение <5 ms, команда ~30 ms. Всего ~465 ms + резерв → целевая <1 с. Реальная задержка измеряется в пилоте.
 
-## 4. Идемпотентность и Command Handling
+## 4. Идемпотентность и Обработка Команд
 
-- **event_id:** идентифицирует событие доступа (camera, timestamp, sequence)
-- **decision_id:** идентифицирует детерминированное решение для event
+- **event_id:** идентифицирует событие доступа
+- **decision_id:** идентифицирует детерминированное решение для события
 - **command_id:** идентифицирует физическую команду турникету
 
-**Retry logic:**
-- Повторные попытки одной команды используют тот же `command_id`
-- Turnstile adapter возвращает previous result/NOOP для уже applied command
-- ACK/NACK handling explicit
-- Durable bounded deduplication state, retention покрывает operational retry/replay horizon (parameter, не invented requirement)
+**Логика повторных попыток:**
+- Повторные попытки одной команды используют тот же command_id
+- Адаптер турникета возвращает предыдущий результат или NOOP для уже применённой команды
+- Явная обработка ACK/NACK
+- Устойчивое состояние дедупликации с retention, покрывающим операционный горизонт повторов (параметр, а не изобретённое требование)
 
-## 5. Версионированные Snapshots и Consistency
+## 5. Версионированные Согласованные Снимки Состояния
 
-Каждое решение использует **один internally consistent immutable snapshot**:
-- Template/ANN index version
-- Access policy version
-- Revocation watermark
+Каждое решение использует **один внутренне согласованный неизменяемый снимок состояния**:
+- Версия шаблонов и ANN индекса
+- Версия политик доступа
+- Метка отзывов (revocation watermark)
 
 **Процесс:**
-- Acquire read snapshot в начале decision
-- Updates validated и atomically swapped
-- Никогда не комбинировать старый ANN с несовместимой новой policy
-- Если consistency не установлена → degraded state → no biometric auto-allow
+- Фиксируется снимок для чтения в начале принятия решения
+- Обновления валидируются и атомарно переключаются
+- Никогда не комбинировать старый ANN с несовместимой новой политикой
+- Если согласованность не установлена → режим деградации → автоматический биометрический допуск запрещён
 
-**Update distribution:**
-- Signed versioned snapshots
-- Incremental diffs с validation
-- Revocation high-priority push
-- Edge ack версии
-- Atomic index swap (no partial state)
+**Распространение обновлений:**
+- Подписанные версионированные снимки
+- Инкрементальные дельты с валидацией
+- Отзывы передаются с высшим приоритетом
+- Edge подтверждает получение версии
+- Атомарное переключение индекса (без частичного состояния)
 
-## 6. Offline и Policy Freshness
+## 6. Автономная Работа и Актуальность Политик
 
-**Policy cache states:**
+**Состояния кэша политик:**
 
-| State | Condition | Biometric Auto-Allow |
-|-------|-----------|---------------------|
-| **FRESH** | age < policy_freshness_threshold | ✅ May proceed if all gates pass |
-| **STALE/UNKNOWN** | age ≥ threshold OR network never reached | ❌ NO auto-allow |
+| Состояние | Условие | Автоматический биометрический допуск |
+|-----------|---------|--------------------------------------|
+| **FRESH** | возраст < порог актуальности | ✅ Разрешён если все проверки пройдены |
+| **STALE/UNKNOWN** | возраст ≥ порог ИЛИ сеть никогда не достигнута | ❌ Запрещён |
 
-**Конкретный threshold** — operational configuration parameter, validated с security/operations. Не изобретаем 60/240-min как facts.
+**Конкретный порог** — операционный конфигурационный параметр, валидируется со службой безопасности и операциями. Не изобретаем 60/240 мин как факты.
 
-**Сценарий E-1005 (offline + potentially missed revocation):**
-- Network offline
-- Policy cache STALE
-- Employee мог быть revoked
-- Biometric decision: **NO auto-allow** → CLOSED
-- Safe fallback: manual process, card (если available), guard review
+**Сценарий E-1005 (автономный режим + потенциально пропущенный отзыв):**
+- Сеть недоступна
+- Кэш политик в состоянии STALE
+- Сотрудник мог быть отозван
+- Биометрическое решение: **автоматический допуск запрещён** → турникет **CLOSED**
+- Безопасный резервный вариант: ручная проверка, проход по карте (если доступна)
 
-**Recovery:** при восстановлении WAN edge запрашивает fresh snapshot, validates, атомарно активирует.
+**Восстановление:** при восстановлении связи edge запрашивает свежий снимок, валидирует, атомарно активирует.
 
 ## 7. Таблица Решений
 
 | Условие | Решение | Турникет | Примечание |
 |---------|---------|----------|------------|
-| Quality + liveness + strong unique match + FRESH valid policy | **ALLOW** | **OPEN** | Единственный путь к auto-open |
-| Low quality / technical issue | **RETRY** | CLOSED | Подсказка «повторите» |
-| Liveness uncertain / PAD fail | **RETRY** or **DENY** | CLOSED | Uncertain → retry; suspected spoof → deny |
-| Borderline match / low margin | **MANUAL_REVIEW** | CLOSED | Guard проверяет |
-| Revoked access | **DENY** | CLOSED | Security log |
-| STALE/UNKNOWN policy | **NO auto-allow** | CLOSED | Degraded: safe fallback/manual |
-| Duplicate command_id | **NOOP** | Previous result | Идемпотентность |
+| Качество + liveness + сильное уникальное совпадение + FRESH валидная политика | **ALLOW** | **OPEN** | Единственный путь к автоматическому открытию |
+| Низкое качество или техническая проблема | **RETRY** | CLOSED | Подсказка «повторите» |
+| Liveness неопределён или сбой PAD | **RETRY** или **DENY** | CLOSED | Неопределённый → повтор; подозрение на спуфинг → отказ |
+| Пограничное совпадение или низкий margin | **MANUAL_REVIEW** | CLOSED | Проверка охраной |
+| Доступ отозван | **DENY** | CLOSED | Лог безопасности |
+| Политика в состоянии STALE/UNKNOWN | **Допуск запрещён** | CLOSED | Режим деградации: безопасный резервный вариант или ручная проверка |
+| Дубликат command_id | **NOOP** | Предыдущий результат | Идемпотентность |
 
 ## 8. Инварианты Безопасности
 
-- **INV-1:** `spoof_suspected` ⇒ турникет never opens
-- **INV-2:** `decision == MANUAL_REVIEW` ⇒ CLOSED (ожидание guard)
-- **INV-3:** `revoked == true` ⇒ never allow
-- **INV-4:** `policy_state == STALE || UNKNOWN` ⇒ no biometric auto-allow
-- **INV-5:** `duplicate(command_id)` ⇒ idempotent (no repeat open)
-- **INV-6:** `OPEN command` только при `decision == ALLOW AND all_gates_passed`
+- **INV-1:** подозрение на спуфинг ⇒ турникет никогда не открывается
+- **INV-2:** решение MANUAL_REVIEW ⇒ CLOSED (ожидание охраны)
+- **INV-3:** доступ отозван ⇒ никогда не ALLOW
+- **INV-4:** политика в состоянии STALE или UNKNOWN ⇒ автоматический биометрический допуск запрещён
+- **INV-5:** дубликат command_id ⇒ идемпотентный (без повторного открытия)
+- **INV-6:** команда OPEN только при ALLOW и прохождении всех проверок
 
-## 9. Audit
+## 9. Аудит
 
-Каждое решение записывает: event_id, timestamp, gate/camera, model/ANN/policy versions, quality/liveness/match scores, decision/reasons, degraded_mode, command_id, side_effect_result, latency_breakdown.
+Каждое решение записывает: event_id, временная метка, проходная/камера, версии модели/ANN/политики, оценки качества/liveness/совпадения, решение и причины, режим деградации, command_id, результат воздействия, разбивка задержки.
 
-**Offline resilience:** durable local queue, async batch sync после recovery. Disk full → alert, biometric disabled.
+**Устойчивость в автономном режиме:** устойчивая локальная очередь, асинхронная пакетная синхронизация после восстановления. Диск заполнен → оповещение, биометрия отключена.
 
-## 10. Privacy и Biometric Storage
+## 10. Конфиденциальность и Хранение Биометрии
 
 - Сырые кадры **не сохраняются по умолчанию** после обработки
-- Central master: encrypted, access-controlled
-- Edge: subset templates для site + version metadata
-- Incident image retention (если enabled): separate short-retention policy, security/legal approval required
+- Центральное хранилище: зашифровано, контроль доступа
+- Edge: подмножество шаблонов для площадки + метаданные версии
+- Сохранение изображений инцидентов (если включено): отдельная политика краткосрочного хранения, требует одобрения службы безопасности и юристов
 
-Конкретные retention periods определяются legal/compliance, не system design.
+Конкретные периоды хранения определяются юридическим отделом и комплаенсом, а не системным дизайном.
 
-## 11. Manual Review Capacity
+## 11. Пропускная Способность Ручной Проверки
 
-**Pilot guardrail:** ≤1% проходов → manual review.
+**Граница пилота:** ≤1% проходов направляется на ручную проверку.
 
-**Capacity math (simultaneous peak):**
-- 3 entrances × 20 passages/min = 60 passages/min
-- 1% = 0.6 review cases/min
-- ~4 min/case ⇒ ~2.4 reviewer-minutes/min average across campus
+**Расчёт пропускной способности (одновременный пик):**
+- 3 входа × 20 проходов в минуту = 60 проходов в минуту
+- 1% = 0.6 случаев ручной проверки в минуту
+- ~4 мин на случай ⇒ ~2.4 минуты работы сотрудников охраны в минуту в среднем по кампусу
 
-**Не заявляем inherently safe/manageable.** Reviewer capacity must be validated в pilot. Growing queue ⇒ stronger retry/card fallback, rollback to assisted mode.
+**Не заявляем, что это безопасно или управляемо по умолчанию.** Пропускная способность сотрудников охраны должна быть проверена в пилоте. Растущая очередь ⇒ усиление повторов и проходов по карте, откат в assisted mode.
 
-## 12. Confirmed False Accept Definition
+## 12. Определение Подтверждённого False Accept
 
-**Confirmed false accept:** unauthorized passage confirmed by security investigation using audit trail, access-rights state, and whatever supporting evidence is legitimately available (не предполагаем mandatory video retention).
+**Подтверждённый false accept:** неавторизованный проход, подтверждённый расследованием службы безопасности с использованием трейла аудита, состояния прав доступа и любых доступных подтверждающих свидетельств (не предполагаем обязательное сохранение видео).
 
-## 13. MVP vs Target
+## 13. MVP vs Целевая Система
 
-**MVP:** deterministic decision engine, mock CV/embedding/liveness, synthetic events, local audit, happy+risky paths, simulated turnstile. Цель: architecture pattern + safety invariants.
+**MVP:** детерминированный движок решений, заглушки CV/embedding/liveness, синтетические события, локальный аудит, сценарии успеха и риска, симуляция турникета. Цель: архитектурный паттерн + инварианты безопасности.
 
-**Target:** pretrained CV stack, hardened edge, production ANN (12k), secure updates, real integration, guard console, monitoring.
+**Целевая система:** предобученный CV стек, защищённый edge, production ANN (12k), безопасные обновления, реальная интеграция, консоль охраны, мониторинг.
 
-## 14. Architecture Diagram
+## 14. Диаграмма Архитектуры
 
 ```mermaid
 graph TB
-    subgraph "Entrance (Edge Node)"
-        CAM1[Camera 1]
-        CAM2[Camera 2]
-        DETECT[Face Detection]
-        QUALITY[Quality Check]
+    subgraph "Проходная (Edge Node)"
+        CAM1[Камера 1]
+        CAM2[Камера 2]
+        DETECT[Обнаружение лица]
+        QUALITY[Проверка качества]
         LIVENESS[Liveness / PAD]
-        EMBED[Embedding Extraction]
-        ANN[Local ANN Index<br/>12k employees]
-        POLICY_CACHE[Access Policy Cache<br/>versioned, TTL]
-        DECISION[Deterministic<br/>Decision Engine]
-        TURNSTILE[Turnstile]
-        AUDIT_QUEUE[Local Audit Queue<br/>durable]
+        EMBED[Извлечение embedding]
+        ANN[Локальный ANN индекс<br/>12k сотрудников]
+        POLICY_CACHE[Кэш политик доступа<br/>версионированный, TTL]
+        DECISION[Детерминированный<br/>движок решений]
+        TURNSTILE[Турникет]
+        AUDIT_QUEUE[Локальная очередь аудита<br/>устойчивая]
         
         CAM1 --> DETECT
         CAM2 --> DETECT
@@ -171,39 +171,39 @@ graph TB
         DECISION --> AUDIT_QUEUE
     end
     
-    subgraph "Central Services (Control Plane)"
-        HR[HR System /<br/>Employee Registry]
-        TEMPLATE_STORE[Biometric Template Store<br/>encrypted master]
-        POLICY_MASTER[Access Policy Master<br/>+ Revocation]
-        MODEL_REPO[Model Repository<br/>versioned CV/ML]
-        AUDIT_CENTRAL[Central Audit Store]
-        MONITORING[Monitoring /<br/>Alerting]
-        GUARD_CONSOLE[Guard Console<br/>Manual Review]
+    subgraph "Центральные Сервисы"
+        HR[HR система /<br/>реестр сотрудников]
+        TEMPLATE_STORE[Хранилище биометрических шаблонов<br/>зашифрованное]
+        POLICY_MASTER[Управление политиками доступа<br/>и отзывами]
+        MODEL_REPO[Репозиторий моделей<br/>версионированный]
+        AUDIT_CENTRAL[Центральное хранилище аудита]
+        MONITORING[Мониторинг /<br/>оповещения]
+        GUARD_CONSOLE[Консоль охраны<br/>ручная проверка]
     end
     
-    subgraph "Security / Manual Review"
-        GUARD[Security Guard]
+    subgraph "Служба Безопасности"
+        GUARD[Охрана]
         GUARD_CONSOLE --> GUARD
         GUARD --> GUARD_CONSOLE
     end
     
-    HR -->|employee sync<br/>versioned| ANN
-    TEMPLATE_STORE -->|template sync<br/>versioned| ANN
-    POLICY_MASTER -->|policy sync<br/>signed, TTL| POLICY_CACHE
-    MODEL_REPO -->|model updates<br/>versioned| EMBED
-    MODEL_REPO -->|model updates| LIVENESS
-    MODEL_REPO -->|model updates| DETECT
+    HR -->|синхронизация<br/>версионированная| ANN
+    TEMPLATE_STORE -->|синхронизация шаблонов<br/>версионированная| ANN
+    POLICY_MASTER -->|синхронизация политик<br/>подписанная, TTL| POLICY_CACHE
+    MODEL_REPO -->|обновления моделей<br/>версионированные| EMBED
+    MODEL_REPO -->|обновления моделей| LIVENESS
+    MODEL_REPO -->|обновления моделей| DETECT
     
-    AUDIT_QUEUE -->|async batch sync| AUDIT_CENTRAL
+    AUDIT_QUEUE -->|асинхронная синхронизация| AUDIT_CENTRAL
     AUDIT_CENTRAL --> MONITORING
-    DECISION -->|manual review events| GUARD_CONSOLE
-    GUARD_CONSOLE -->|delayed labels| AUDIT_CENTRAL
+    DECISION -->|события ручной проверки| GUARD_CONSOLE
+    GUARD_CONSOLE -->|отложенные метки| AUDIT_CENTRAL
     
-    ANN -.->|version ack| HR
-    ANN -.->|version ack| TEMPLATE_STORE
-    POLICY_CACHE -.->|version ack| POLICY_MASTER
+    ANN -.->|подтверждение версии| HR
+    ANN -.->|подтверждение версии| TEMPLATE_STORE
+    POLICY_CACHE -.->|подтверждение версии| POLICY_MASTER
     
-    MONITORING -->|alerts| GUARD
+    MONITORING -->|оповещения| GUARD
     
     style DECISION fill:#ffcccc
     style TURNSTILE fill:#ffcccc
@@ -214,15 +214,15 @@ graph TB
     style POLICY_MASTER fill:#ffffcc
 ```
 
-**Легенда:** Красный = критический путь; Зелёный = локальное edge состояние; Жёлтый = sensitive central state; Сплошные = sync; Пунктир = async.
+**Легенда:** Красный = критический путь; Зелёный = локальное состояние edge; Жёлтый = чувствительное центральное состояние; Сплошные линии = синхронные; Пунктир = асинхронные.
 
 ## 15. Ключевые Решения
 
-1. **Edge-first hybrid:** latency + offline resilience
-2. **Deterministic decision, no LLM:** safety + audit
-3. **Binary policy freshness:** FRESH (allow) / STALE (no auto-allow), no degraded-auto-allow middle state
-4. **Versioned consistent snapshots:** atomic updates, no partial state mixing
-5. **Idempotent commands:** durable deduplication, ACK/NACK handling
-6. **Fail-closed:** uncertain identity/spoof/revoked/stale → CLOSED
-7. **Local durable audit:** offline resilience
-8. **Privacy-minimizing:** no default raw frame retention
+1. **Гибрид с приоритетом edge:** минимальная задержка + устойчивость в автономном режиме
+2. **Детерминированные решения, без LLM:** безопасность + аудит
+3. **Бинарная актуальность политик:** FRESH (допуск разрешён) или STALE (допуск запрещён), без промежуточного состояния
+4. **Версионированные согласованные снимки:** атомарные обновления, без смешивания частичных состояний
+5. **Идемпотентные команды:** устойчивая дедупликация, обработка ACK/NACK
+6. **Безопасный отказ:** неопределённая личность, спуфинг, отозван, устаревшие политики → CLOSED
+7. **Локальный устойчивый аудит:** работа в автономном режиме
+8. **Минимизация раскрытия данных:** без сохранения сырых кадров по умолчанию

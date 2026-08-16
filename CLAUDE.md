@@ -15,6 +15,11 @@ It MUST remain domain-neutral until the real task is received.
 9. Keep AI_USAGE factual: record useful AI mistakes and rejected suggestions as they happen.
 10. Never write API keys, tokens, credentials, employee data, or biometric data into the repo.
 
+## Language
+Все пользовательские и сдаваемые Markdown-документы пишутся на русском языке.
+Английский допускается только для кода, идентификаторов, названий файлов,
+стандартных сокращений и терминов, перевод которых ухудшает техническую точность.
+
 ## Before proposing a commit
 Run:
 
